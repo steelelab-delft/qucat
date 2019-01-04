@@ -85,10 +85,9 @@ pp={
 
 class BBQcircuit(object):
     """docstring for BBQcircuit"""
-    def __init__(self, netlist):
+    def __init__(self, circuit):
         super(BBQcircuit, self).__init__()
-        self.netlist = netlist
-        self.circuit = netlist_to_circuit(netlist)
+        self.circuit = deepcopy(circuit)
 
         self.circuit.set_head(self)
         self.circuit.set_parenthood()
@@ -361,34 +360,6 @@ class BBQcircuit(object):
 
     def show(*args,**kwargs):
         return self.circuit.show(*args,**kwargs)
-
-def netlist_to_circuit(netlist):
-    if isinstance(netlist,Circuit):
-        return netlist
-    else:
-        # construct node_names
-        node_names = []
-        for branch in netlist:
-            nodes = [branch[1],branch[2]]
-            for node in nodes:
-                if node not in node_names:
-                    node_names.append(node)
-
-        # initialize netlist_dict
-        netlist_dict = {}
-        for node in node_names:
-            netlist_dict[node] = []
-
-        # construct netlist_dict
-        for branch in netlist:
-            element = branch[0]
-            nodes = [branch[1],branch[2]]
-            for i,node in enumerate(nodes):
-                other_node = nodes[(i+1)%2]
-                netlist_dict[node].append([other_node,element])
-
-        # Transform to circuit...
-
 
 class Circuit(object):
     """docstring for Circuit"""
@@ -1027,5 +998,6 @@ def check_there_are_no_iterables_in_kwarg(**kwargs):
 
 if __name__ == '__main__':
     qubit = C(100e-15)|J(1e-9)
-    cQED_circuit = BBQcircuit(qubit + C(1e-15) + (C(100e-15)|L(10e-9)|R(1e6)))
+    resonator = C(100e-15)|L(10e-9)|R(1e6)
+    cQED_circuit = BBQcircuit(qubit + C(1e-15) + resonator)
     cQED_circuit.show_normal_mode(0)
