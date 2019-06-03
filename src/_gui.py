@@ -283,12 +283,26 @@ class CircuitEditor(tk.Canvas):
     def __init__(self, master, grid_unit, netlist_filename,
             track_events_to = None, unittesting = False,verbose = False,os_type = 'windows'):
 
+        self.os_type = os_type
+
+        # Set font size depending on OS type
         if os_type == 'mac':
             self.font_size = 14
         elif os_type == 'linux':
             self.font_size = 10
         else:
             self.font_size = 8
+
+        self.graphics_extension = '.png'
+        self.force_grab_set = False
+        # for old versions of mac OS, use jpg rather than png
+        # And force events to be routed to the editor
+        # when leaving the window by setting force_grab_set to True 
+        if platform.system() == 'Darwin':
+            if int(platform.mac_ver()[0].split('.')[0]) <= 10:
+                if int(platform.mac_ver()[0].split('.')[1]) <= 13:
+                    self.graphics_extension = '.jpg'
+                    self.force_grab_set = True
 
         self.paired_sequences = []
         if os_type == 'mac':
@@ -444,8 +458,8 @@ class CircuitEditor(tk.Canvas):
         # The items appearing in the cascade menu that appears when 
         # clicking on File for example will have 15 characters width on the 
         # left where the name of the functionality is provided and
-        # 6 characters on the right where the keyboard shortcut is provided
-        label_template = "{:<15}{:>6}"
+        # 15 characters on the right where the keyboard shortcut is provided
+        label_template = "{:<15}{:>15}"
 
         # The font for the cascading items is defined
         # Note: for everything to be aligned the chosen font should 
@@ -522,7 +536,7 @@ class CircuitEditor(tk.Canvas):
             font=menu_font)
 
         menu.add_command(
-            label=label_template.format("Rotate", "Arrows"), 
+            label=label_template.format("Rotate", "Drag+Arrows"), 
             command=(lambda :self.event_generate('<Alt-r>')), 
             font=menu_font)
 
@@ -813,6 +827,11 @@ class CircuitEditor(tk.Canvas):
         '''To set before we start dragging
         '''
 
+        # reroute all mouse-movements (even outside of the editor)
+        # to the editor widget 
+        if self.force_grab_set:
+            self.grab_set()
+
         # unset nearly all bindings
         self.unset_temporary_bindings(exceptions = ["<Motion>"])
         self.unset_bindings(self.permenant_bindings)
@@ -844,6 +863,12 @@ class CircuitEditor(tk.Canvas):
 
         # Save the changes that have occured
         self.save()
+
+        # stop reroute all events (even outside of the editor)
+        # to the editor widget, this allows us to use the edit bar again for example
+        if self.force_grab_set:
+            self.grab_release()
+            self.grab_current()
 
         # Go back to state 0
         self.set_state(0)
@@ -895,6 +920,11 @@ class CircuitEditor(tk.Canvas):
         '''To set before we start creating somthing
         '''
 
+        # reroute all mouse-movements (even outside of the editor)
+        # to the editor widget 
+        if self.force_grab_set:
+            self.grab_set()
+
         # unset bindings
         self.unset_temporary_bindings()
         self.unset_bindings(self.permenant_bindings)
@@ -916,6 +946,12 @@ class CircuitEditor(tk.Canvas):
     def exit_state_4(self):
         '''When finished creating something
         '''
+
+        # stop reroute all events (even outside of the editor)
+        # to the editor widget, this allows us to use the edit bar again for example
+        if self.force_grab_set:
+            self.grab_release()
+            self.grab_current()
 
         # We just dragged and dropped a component
         # so we check if nodes of that component 
@@ -3139,12 +3175,12 @@ class Component(TwoNodeElement):
     ###########################################  
 
     def create(self):
-        self.add_or_replace_node_dots()
         x, y, angle = self.center_pos
         self.import_image()
         self.image = self.canvas.create_image(
             *self.grid_to_canvas([x, y]), image=self.tk_image)
         self.add_or_replace_label()
+        self.add_or_replace_node_dots()
         self.canvas.elements.append(self)
         self.canvas.set_state(0)
      
@@ -3222,6 +3258,7 @@ class Component(TwoNodeElement):
         '''
         Input given in canvas units
         '''
+
         self.canvas.move(self.image, dx, dy)
         if self.dot_minus is not None:
             self.canvas.delete(self.dot_minus)
@@ -3288,12 +3325,12 @@ class Component(TwoNodeElement):
     ###########################################
     
     def import_image(self):
-        png = type(self).__name__
+        img_name = type(self).__name__
         if self.hover:
-            png += '_hover'
+            img_name += '_hover'
         if self.selected:
-            png += '_selected'
-        png += '.png'
+            img_name += '_selected'
+        img_name += self.canvas.graphics_extension
 
         if self.center_pos[2] is None:
             angle = self.init_angle
@@ -3301,8 +3338,8 @@ class Component(TwoNodeElement):
             angle = self.center_pos[2]
 
         # Location to store the inductor/capacitor/.. graphics
-        png_directory = os.path.join(os.path.dirname(__file__), ".graphics")
-        img = Image.open(os.path.join(png_directory, png))
+        img_directory = os.path.join(os.path.dirname(__file__), ".graphics")
+        img = Image.open(os.path.join(img_directory, img_name))
         size = int(self.canvas.grid_unit*(1-1*self.node_dot_radius))
         img = img.resize((size, int(size/2)))
         img = img.rotate(angle,expand = True)
@@ -3450,6 +3487,14 @@ class RequestValueLabelWindow(tk.Toplevel):
 
         # Determine values v(value) and l(label) fields
         v, l = self.component.prop
+
+        # if we are creating this component 
+        # we want to re-direct the events away from the editor and onto 
+        # this widget
+        # This will be cancelled upon exiting state 4
+        if v is None and l is None and self.component.canvas.force_grab_set:
+            self.grab_set()
+
         if v is None:
             v = ''
         else:
@@ -3665,7 +3710,13 @@ class GuiWindow(ttk.Frame):
         if _unittesting:
             self.update()
         else:
-            self.mainloop()
+            try:
+                self.mainloop()
+            except UnicodeDecodeError:
+                messagebox.showinfo("","Oops.. Circuit editor crashed.\n\n"+\
+                    "This can happen when scrolling on MacOS with an out-dated version of Python: you may want to upgrade to the latest Python version\n\n"+\
+                    "If that is not the source of error, please submit a bug report, and we will try and solve the problem as fast as possible:\n"+\
+                    "https://qucat.org/report_a_bug.html")
 
 if __name__ == '__main__':
     GuiWindow(sys.argv[1])
